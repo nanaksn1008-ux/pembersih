@@ -169,18 +169,36 @@ class MainActivity : Activity() {
             val msg: String = try {
                 val sm = getSystemService(Context.STORAGE_SERVICE) as StorageManager
                 val before = StatFs(Environment.getDataDirectory().path).availableBytes
-                val want = sm.getAllocatableBytes(StorageManager.UUID_DEFAULT)
-                val tmp = File(cacheDir, "alloc.tmp")
-                FileOutputStream(tmp).use { out ->
-                    sm.allocateBytes(out.fd, want)
+                val tmp = File(filesDir, "alloc.tmp")
+                val margin = 64L * 1024 * 1024
+                var ok = false
+                var lastError = ""
+
+                for (attempt in 0 until 6) {
+                    val want = sm.getAllocatableBytes(StorageManager.UUID_DEFAULT) -
+                        margin * (attempt + 1)
+                    if (want <= 0L) break
+                    try {
+                        FileOutputStream(tmp).use { out ->
+                            sm.allocateBytes(out.fd, want)
+                        }
+                        ok = true
+                        break
+                    } catch (e: java.io.IOException) {
+                        lastError = e.message ?: ""
+                    } finally {
+                        tmp.delete()
+                    }
                 }
-                tmp.delete()
+
                 val after = StatFs(Environment.getDataDirectory().path).availableBytes
                 val freed = after - before
-                if (freed > 1024 * 1024) {
-                    "Selesai. Sekitar " + fmt(freed) + " cache dibersihkan oleh sistem."
-                } else {
-                    "Selesai, tapi sistem hampir tidak menghapus cache (kurang dari 1 MB)."
+                when {
+                    !ok -> "Gagal: " + lastError
+                    freed > 1024 * 1024 ->
+                        "Selesai. Sekitar " + fmt(freed) + " cache dibersihkan oleh sistem."
+                    else ->
+                        "Selesai, tapi sistem hampir tidak menghapus cache (kurang dari 1 MB)."
                 }
             } catch (e: Throwable) {
                 "Gagal: " + e.javaClass.simpleName + " " + (e.message ?: "")
